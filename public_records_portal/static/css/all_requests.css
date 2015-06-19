@@ -1,5 +1,15 @@
 /* custom css for all_requests.html and child templates */
 
+/* top area */
+.blurb {
+	padding-bottom: 1em;
+}
+
+/* export data area */
+	p.text-center a:hover {
+		text-decoration: none;
+	}
+
 /* remove styling from request text link */
 	td a {
 		color: #333;
@@ -12,7 +22,7 @@
 	table {
 		margin: 0 auto;
 		clear: both;
-		width: 100%;
+		/*width: 100%;*/
 	}
 
 	table thead th {
@@ -172,6 +182,9 @@ h3 {
 }
 .search_style h5 {
 	margin: 15px 0px 3px;
+}
+.search_style {
+	margin-bottom: 10px;
 }
 .status{
   padding-bottom: 15px;

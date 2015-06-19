@@ -1,3 +1,12 @@
+"""
+    public_records_portal.RequestPresenter
+    ~~~~~~~~~~~~~~~~
+
+    Returns the html needed for the 'Request' portion of the case page.
+
+"""
+
+
 from public_records_portal import models
 from models import Note, QA
 from db_helpers import get_obj
@@ -12,8 +21,21 @@ class RequestPresenter:
 			self.type = "qa"
 			self.uid = self.response.owner_id
 			self.staff = get_obj("User", self.uid)
-			directory_popover = "directoryPopover('%s', '%s', '%s', '#contactinfoPopoverQA%s')" %(self.staff.email, self.staff.department, self.staff.phone, index)
-			self.owner_link = '<a href="/staff_card/%s" data-placement="top" data-toggle="popover" href="#" id="contactinfoPopoverQA%s" class="hidden-phone hidden-tablet"><span class="contactinfoPopover" onmouseover="%s">%s</span></a>' % (self.response.owner_id, index, directory_popover, self.staff.alias or self.staff.email)
+			self.staff_email = "N/A"
+			self.staff_department = "N/A"
+			self.staff_phone = "N/A"
+			self.staff_alias = "N/A"
+			if self.staff:
+				if self.staff.email:
+					self.staff_email = self.staff.email
+				if self.staff.department:
+					self.staff_department = self.staff.department
+				if self.staff.phone:
+					self.staff_phone = self.staff.phone
+				if self.staff.alias:
+					self.staff_alias = self.staff.alias
+			directory_popover = "directoryPopover('%s', '%s', '%s', '#contactinfoPopoverQA%s')" %(self.staff_email, self.staff_department, self.staff_phone, index)
+			self.owner_link = '<a href="/staff_card/%s" data-placement="top" data-toggle="popover" href="#" id="contactinfoPopoverQA%s" class="hidden-phone hidden-tablet"><span class="contactinfoPopover" onmouseover="%s">%s</span></a>' % (self.response.owner_id, index, directory_popover, self.staff_alias or self.staff_email)
 			self.icon = "icon-question icon-large"
 		if note:
 			self.response = note

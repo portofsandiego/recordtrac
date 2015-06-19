@@ -145,17 +145,17 @@ def update_obj(attribute, val, obj_type = None, obj_id = None, obj = None):
 	return False
 
 ### @export "create_QA"
-def create_QA(request_id, question, owner_id):
+def create_QA(request_id, question, user_id):
 	""" Create a QA object and return the ID. """
-	qa = QA(request_id = request_id, question = question, owner_id = owner_id)
+	qa = QA(request_id = request_id, question = question, user_id = user_id)
 	db.session.add(qa)
 	db.session.commit()
 	return qa.id
 
 ### @export "create_request"
-def create_request(text, user_id, department = None, offline_submission_type = None, date_received = None):
+def create_request(text, user_id, offline_submission_type = None, date_received = None):
 	""" Create a Request object and return the ID. """
-	req = Request(text = text, creator_id = user_id, department = department, offline_submission_type = offline_submission_type, date_received = date_received)
+	req = Request(text = text, creator_id = user_id, offline_submission_type = offline_submission_type, date_received = date_received)
 	db.session.add(req)
 	db.session.commit()
 	req.set_due_date()
@@ -201,6 +201,9 @@ def remove_obj(obj_type, obj_id):
 ### @export "create_answer"
 def create_answer(qa_id, subscriber_id, answer):
 	qa = get_obj("QA", qa_id)
+	if not qa:
+		app.logger.info("\n\nQA with id: %s does not exist" % (qa_id))
+		return None
 	qa.subscriber_id = subscriber_id
 	qa.answer = answer
 	db.session.add(qa)
@@ -307,13 +310,6 @@ def find_request(text):
 		return req.id
 	return None
 
-### @export "find_owner"
-def find_owner(request_id, user_id):
-	owner = Owner.query.filter_by(request_id = request_id, user_id = user_id).first() 
-	if owner:
-		return owner.id
-	return None
-
 
 ### @export "add_staff_participant"
 def add_staff_participant(request_id, is_point_person = False, email = None, user_id = None, reason = None):
@@ -330,6 +326,9 @@ def add_staff_participant(request_id, is_point_person = False, email = None, use
 	else:
 		if is_point_person and not participant.is_point_person:
 			participant.is_point_person = True
+			participant.date_updated = datetime.now().isoformat()
+			if reason: # Update the reason
+				participant.reason = reason 
 			app.logger.info("\n\nStaff participant with owner ID: %s is now the point of contact for request %s" %(participant.id, request_id))
 		else:
 			is_new = False
@@ -347,6 +346,7 @@ def remove_staff_participant(owner_id, reason = None):
 	participant.reason_unassigned = reason
 	db.session.add(participant)
 	db.session.commit()
+	app.logger.info("\n\n Staff participant with owner ID: %s has been removed for following reason %s" %(owner_id, reason))
 	return owner_id
 
 

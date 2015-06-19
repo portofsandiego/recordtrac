@@ -1,7 +1,9 @@
-""" 
-.. module:: prr
-	:synopsis: Things one can do relating to a public records request.
-.. modlueauthor:: Richa Agarwal <richa@codeforamerica.org>
+"""
+    public_records_portal.prr
+    ~~~~~~~~~~~~~~~~
+
+    Implements functions specific to managing or creating a public records request.
+
 """
 
 from public_records_portal import app, db_helpers
@@ -9,12 +11,12 @@ import os, time, json
 from flask import Flask, request
 from flask.ext.login import current_user
 from datetime import datetime, timedelta
+from db_helpers import find_request, create_request, get_obj, add_staff_participant, remove_staff_participant, update_obj, get_attribute, change_request_status, create_or_return_user, create_subscriber, create_record, create_note, create_QA, create_answer, update_user
 from models import *
 from ResponsePresenter import ResponsePresenter
 from RequestPresenter import RequestPresenter
 from notifications import generate_prr_emails
 import scribd_helpers
-from db_helpers import *
 from spam import is_spam
 import logging
 import csv
@@ -26,18 +28,23 @@ def add_resource(resource, request_body, current_user_id = None):
 	if "extension" in resource:
 		return request_extension(int(fields['request_id']), fields.getlist('extend_reason'), current_user_id)
 	if "note" in resource:
-		return add_note(int(fields['request_id']), fields['note_text'], current_user_id)
+		return add_note(request_id = int(fields['request_id']), text = fields['note_text'], user_id = current_user_id, passed_spam_filter = True) # Bypass spam filter because they are logged in.
 	elif "record" in resource:
 		if fields['record_description'] == "":
 			return "When uploading a record, please fill out the 'summary' field."
 		if 'record_access' in fields and fields['record_access'] != "":
 			return add_offline_record(int(fields['request_id']), fields['record_description'], fields['record_access'], current_user_id)
 		elif 'link_url' in fields and fields['link_url'] != "":
-			return add_link(int(fields['request_id']), fields['link_url'], fields['record_description'], current_user_id)
+			return add_link(request_id = int(fields['request_id']), url = fields['link_url'], description = fields['record_description'], user_id = current_user_id)
 		else:
-			return upload_record(int(fields['request_id']), request.files['record'], fields['record_description'], current_user_id)
+			document = None
+			try:
+				document = request.files['record']
+			except:
+				app.logger.info("\n\nNo file passed in")
+			return upload_record(request_id = int(fields['request_id']), document = document, description = fields['record_description'], user_id = current_user_id)
 	elif "qa" in resource:
-		return ask_a_question(int(fields['request_id']), current_user_id, fields['question_text'])
+		return ask_a_question(request_id = int(fields['request_id']), user_id = current_user_id, question = fields['question_text'])
 	elif "owner" in resource:
 		participant_id, new = add_staff_participant(request_id = fields['request_id'], email = fields['owner_email'], reason = fields['owner_reason'])
 		if new:
@@ -82,11 +89,11 @@ def request_extension(request_id, extension_reasons, user_id):
 	for reason in extension_reasons:
 		text = text + reason + "</br>"
 	add_staff_participant(request_id = request_id, user_id = user_id)
-	return add_note(request_id = request_id, text = text, user_id = user_id)
+	return add_note(request_id = request_id, text = text, user_id = user_id, passed_spam_filter = True) # Bypass spam filter because they are logged in.
 
 ### @export "add_note"
-def add_note(request_id, text, user_id, passed_spam_filter = False):
-	if not text or text == "" or (not user_id and not passed_spam_filter):
+def add_note(request_id, text, user_id = None, passed_spam_filter = False):
+	if not text or text == "" or (not passed_spam_filter):
 		return False
 	note_id = create_note(request_id = request_id, text = text, user_id = user_id)
 	if note_id:
@@ -102,10 +109,10 @@ def add_note(request_id, text, user_id, passed_spam_filter = False):
 
 
 ### @export "upload_record"
-def upload_record(request_id, file, description, user_id):
+def upload_record(request_id, description, user_id, document = None):
 	""" Creates a record with upload/download attributes """
 	try:
-		doc_id, filename = scribd_helpers.upload_file(file = file, request_id = request_id)
+		doc_id, filename = scribd_helpers.upload_file(document = document, request_id = request_id)
 	except:
 		return "The upload timed out, please try again."
 	if doc_id == False:
@@ -160,7 +167,7 @@ def make_request(text, email = None, user_id = None, phone = None, alias = None,
 		else:
 			app.logger.info("%s is not a valid department" %(department))
 			department = None
-	request_id = create_request(text = text, user_id = user_id, department = department, offline_submission_type = offline_submission_type, date_received = date_received) # Actually create the Request object
+	request_id = create_request(text = text, user_id = user_id, offline_submission_type = offline_submission_type, date_received = date_received) # Actually create the Request object
 	new_owner_id = assign_owner(request_id = request_id, reason = assigned_to_reason, email = assigned_to_email) # Assign someone to the request
 	open_request(request_id) # Set the status of the incoming request to "Open"
 	if email or alias or phone:
@@ -180,16 +187,16 @@ def add_subscriber(request_id, email):
 	return False
 
 ### @export "ask_a_question"	
-def ask_a_question(request_id, owner_id, question):
+def ask_a_question(request_id, user_id, question):
 	""" City staff can ask a question about a request they are confused about."""
 	req = get_obj("Request", request_id)
-	qa_id = create_QA(request_id = request_id, question = question, owner_id = owner_id)
+	qa_id = create_QA(request_id = request_id, question = question, user_id = user_id)
 	if qa_id:
 		change_request_status(request_id, "Pending")
 		requester = req.requester()
 		if requester:
 			generate_prr_emails(request_id, notification_type = "Question asked", user_id = requester.user_id)
-		add_staff_participant(request_id = request_id, user_id = get_attribute(attribute = "user_id", obj_id = owner_id, obj_type = "Owner"))
+		add_staff_participant(request_id = request_id, user_id = user_id)
 		return qa_id
 	return False
 
@@ -271,35 +278,32 @@ def get_responses_chronologically(req):
 def set_directory_fields():
 	# Set basic user data
 	if 'STAFF_URL' in app.config:
-
-		# This gets run at regular internals via cron_jobs.py in order to keep the staff user list up to date. Before users are added/updated, ALL users get reset to 'inactive', and then only the ones in the current CSV are set to active. 
+		# This gets run at regular internals via db_users.py in order to keep the staff user list up to date. Before users are added/updated, ALL users get reset to 'inactive', and then only the ones in the current CSV are set to active. 
 		for user in User.query.filter(User.is_staff == True).all():
 			update_user(user = user, is_staff = False)
 		csvfile = urllib.urlopen(app.config['STAFF_URL'])
 		dictreader = csv.DictReader(csvfile, delimiter=',')
 		for row in dictreader:
 			create_or_return_user(email = row['email'].lower(), alias = row['name'], phone = row['phone number'], department = row['department name'], is_staff = True)
+		# Set liaisons data (who is a PRR liaison for what department)
+		if 'LIAISONS_URL' in app.config:
+			csvfile = urllib.urlopen(app.config['LIAISONS_URL'])
+			dictreader = csv.DictReader(csvfile, delimiter=',')
+			for row in dictreader:
+				user = create_or_return_user(email = row['PRR liaison'], contact_for = row['department name'])
+				if row['PRR backup'] != "":
+					user = create_or_return_user(email = row['PRR backup'], backup_for = row['department name'])
+		else:
+			app.logger.info("\n\n Please update the config variable LIAISONS_URL for where to find department liaison data for your agency.")
 	else:
-		app.logger.info("\n\n Please add an environment variable for where to find csv data on the users in your agency.")
+		app.logger.info("\n\n Please update the config variable STAFF_URL for where to find csv data on the users in your agency.") 
+		if 'DEFAULT_OWNER_EMAIL' in app.config and 'DEFAULT_OWNER_REASON' in app.config:
+			create_or_return_user(email = app.config['DEFAULT_OWNER_EMAIL'].lower(), alias = app.config['DEFAULT_OWNER_EMAIL'], department = app.config['DEFAULT_OWNER_REASON'], is_staff = True)
+			app.logger.info("\n\n Creating a single user from DEFAULT_OWNER_EMAIL and DEFAULT_OWNER_REASON for now. You may log in with %s" %(app.config['DEFAULT_OWNER_EMAIL']))
+		else:
+			app.logger.info("\n\n Unable to create any users. No one will be able to log in.")
 
-	# Set liaisons data (who is a PRR liaison for what department)
-	if 'LIAISONS_URL' in app.config:
-		csvfile = urllib.urlopen(app.config['LIAISONS_URL'])
-		dictreader = csv.DictReader(csvfile, delimiter=',')
-		for row in dictreader:
-			user = create_or_return_user(email = row['PRR liaison'], contact_for = row['department name'])
-			if row['PRR backup'] != "":
-				user = create_or_return_user(email = row['PRR backup'], backup_for = row['department name'])
-	else:
-		app.logger.info("\n\n Please add an environment variable for where to find department liaison data for your agency.")
 
-			
-### @export "last_note"
-def last_note(request_id):
-	notes = get_attribute(attribute = "notes", obj_id = request_id, obj_type = "Request")
-	if notes:
-		return notes[0]
-	return None
 
 ### @export "close_request"
 def close_request(request_id, reason = "", user_id = None):

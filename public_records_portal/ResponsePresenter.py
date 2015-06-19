@@ -1,6 +1,15 @@
-from public_records_portal import models, scribd_helpers
-from models import Record, Note
+"""
+    public_records_portal.RequestPresenter
+    ~~~~~~~~~~~~~~~~
 
+    Returns the html needed for the 'Response' portion of the case page.
+
+"""
+
+
+
+from models import Record, Note
+import scribd_helpers
 
 class ResponsePresenter:
 	def __init__(self, record = None, note = None):
@@ -62,13 +71,13 @@ class ResponsePresenter:
 				if not download_url:
 					download_url = "This document is still being uploaded, but it will be available shortly."
 			return """
-			<a href='%(download_url)s' rel='tooltip' data-toggle='tooltip' data-placement='top' data-original-title='%(download_url)s' target='_blank'><b>%(description)s</b></a>
-			<a href = '%(scribd_url)s' rel='tooltip' data-toggle='tooltip' data-placement='top' data-original-title='View document on Scribd hosting service' target='_blank'><i class='icon-external-link'></i></a>
+			<a href='%(download_url)s' rel='tooltip' data-toggle='tooltip' data-placement='top' data-original-title='%(download_url)s' target='_blank'><b>%(description)s </b></a>
+			<a href = '%(scribd_url)s' rel='tooltip' data-toggle='tooltip' data-placement='top' data-original-title='View document on Scribd hosting service' target='_blank'><small><i class='icon-external-link'> </i></small></a>
 			""" %{"download_url": download_url, "description": self.response.description, "scribd_url": self.response.url} 
 		elif self.type == "note":
 			return self.response.text
 		elif self.type == "link":
-			return "<a href='%s' rel='tooltip' data-toggle='tooltip' data-placement='top' data-original-title='%s'>%s <i class='icon-external-link'></i></a>" % (self.response.url, self.response.url, self.response.description)
+			return "<a href='%s' rel='tooltip' data-toggle='tooltip' data-placement='top' data-original-title='%s'>%s </a>" % (self.response.url, self.response.url, self.response.description)
 		elif self.type == "extension":
 			text = self.response.text.strip("Request extended:")
 			return text

@@ -1,13 +1,17 @@
-"""Contains all functions that render templates/html for the app.
 """
+    public_records_portal.views
+    ~~~~~~~~~~~~~~~~
+
+    Implements functions that render the Jinja (http://jinja.pocoo.org/) templates/html for RecordTrac.
+
+"""
+
 
 from flask import render_template, request, redirect, url_for, jsonify
 from flask.ext.login import LoginManager, login_user, logout_user, current_user, login_required
 from flaskext.browserid import BrowserID
-from public_records_portal import app
-from filters import *
+from public_records_portal import app, db, models
 from prr import add_resource, update_resource, make_request, close_request
-from db_helpers import *
 from db_helpers import get_user_by_id # finds a user by their id
 from db_helpers import get_user # finds a user based on BrowserID response
 import os, json
@@ -24,6 +28,11 @@ import anyjson
 import helpers
 import csv_export
 from datetime import datetime, timedelta
+from filters import *
+import re
+from db_helpers import get_count, get_obj
+from sqlalchemy import func, not_, and_, or_
+import pytz
 
 # Initialize login
 
@@ -34,7 +43,6 @@ login_manager.init_app(app)
 browser_id = BrowserID()
 browser_id.user_loader(get_user)
 browser_id.init_app(app)
-
 
 
 # Submitting a new request
@@ -57,7 +65,7 @@ def new_request(passed_recaptcha = False, data = None):
 		offline_submission_type = None
 		date_received = None
 		department = None
-		if 'department' in data:
+		if 'request_department' in data:
 			department = data['request_department']
 		if 'request_alias' in data:
 			alias = data['request_alias']
@@ -70,7 +78,10 @@ def new_request(passed_recaptcha = False, data = None):
 			if date_received != "":
 				try:
 					date_received = datetime.strptime(date_received, '%m/%d/%Y') 
-					date_received = date_received + timedelta(hours = 7) # This is somewhat of a hack, but we need to get this back in UTC (+7 hours offset from Pacific Time) time but still treat it as a 'naive' datetime object
+					tz = pytz.timezone(app.config['TIMEZONE'])
+					offset = tz.utcoffset(datetime.now())
+					offset = (offset.days * 86400 + offset.seconds) / 3600
+					date_received = date_received - timedelta(hours = offset) # This is somewhat of a hack, but we need to get this back in UTC time but still treat it as a 'naive' datetime object
 				except ValueError:
 					return render_template('error.html', message = "Please use the datepicker to select a date.")
 		request_id, is_new = make_request(text = request_text, email = email, alias = alias, phone = phone, passed_spam_filter = True, department = department, offline_submission_type = offline_submission_type, date_received = date_received)
@@ -81,13 +92,15 @@ def new_request(passed_recaptcha = False, data = None):
 		app.logger.info("\n\nDuplicate request entered: %s" % request_text)
 		return render_template('error.html', message = "Your request is the same as /request/%s" % request_id)
 	else:
+		departments = None
 		routing_available = False
 		if 'LIAISONS_URL' in app.config:
 			routing_available = True
+			departments = db.session.query(models.Department).all()
 		if current_user.is_authenticated():
-			return render_template('offline_request.html', routing_available = routing_available)
+			return render_template('offline_request.html', routing_available = routing_available, departments = departments)
 		else:
-			return render_template('new_request.html', routing_available = routing_available)
+			return render_template('new_request.html', routing_available = routing_available, departments = departments)
 
 @app.route("/export")
 @login_required
@@ -97,7 +110,7 @@ def to_csv():
 @app.route("/", methods = ["GET", "POST"])
 def index():
 	if current_user.is_anonymous() == False:
-		return redirect(url_for('requests'))
+		return redirect(url_for('display_all_requests'))
 	else:
 		return landing()
 
@@ -133,7 +146,10 @@ show_request_for_x.methods = ['GET', 'POST']
 @app.route("/city/request/<int:request_id>")
 @login_required
 def show_request_for_city(request_id):
-	return show_request(request_id = request_id, template = "manage_request_city.html")
+	if is_supported_browser():
+		return show_request(request_id = request_id, template = "manage_request_city.html")
+	else:
+		return show_request(request_id = request_id, template = "manage_request_city_less_js.html")
 
 @app.route("/response/<int:request_id>")
 def show_response(request_id):
@@ -178,7 +194,7 @@ def show_request(request_id, template = "manage_request_public.html"):
 
 @app.route("/api/staff")
 def staff_to_json():
-	users = User.query.filter(User.is_staff == True).all()
+	users = models.User.query.filter(models.User.is_staff == True).all()
 	staff_data = []
 	for u in users:
 		staff_data.append({'alias': u.alias, 'email': u.email})
@@ -186,7 +202,7 @@ def staff_to_json():
 
 @app.route("/api/departments")
 def departments_to_json():
-	departments = Department.query.all()
+	departments = models.Department.query.all()
 	department_data = []
 	for d in departments:
 		department_data.append({'department': d.name})
@@ -225,7 +241,7 @@ def public_add_a_resource(resource, passed_recaptcha = False, data = None):
 			if 'note' in resource:
 				if not passed_recaptcha and is_spam(comment = data['note_text'], user_ip = request.remote_addr, user_agent = request.headers.get('User-Agent')):
 					return render_template('recaptcha_note.html', form = data, message = "Hmm, your note looks like spam. To submit your note, type the numbers or letters you see in the field below.")
-				resource_id = prr.add_note(request_id = data['request_id'], text = data['note_text'], user_id = None, passed_spam_filter = True)
+				resource_id = prr.add_note(request_id = data['request_id'], text = data['note_text'], passed_spam_filter = True)
 			else:
 				resource_id = prr.add_resource(resource = resource, request_body = data, current_user_id = None)
 			if type(resource_id) == int:
@@ -260,20 +276,31 @@ def close(request_id = None):
 	if request.method == 'POST':
 		template = 'closed.html'
 		request_id = request.form['request_id']
-		close_request(request_id = request_id, reason = request.form['close_reason'], user_id = get_user_id())
+		reason = ""
+		if 'close_reason' in request.form:
+			reason = request.form['close_reason']
+		elif 'close_reasons' in request.form:
+			for close_reason in request.form.getlist('close_reasons'):
+				reason += close_reason + " "
+		close_request(request_id = request_id, reason = reason, user_id = get_user_id())
 		return show_request(request_id, template= template)
 	return render_template('error.html', message = "You can only close from a requests page!")
 
 
-def filter_department(department_name, results):
-	app.logger.info("\n\nDepartment filter:%s." % department_name)
-	if department_name and department_name != "All departments":
-		department = Department.query.filter_by(name = department_name).first()
-		if department:
-			results = results.filter(Request.department_id == department.id)
+def filter_department(departments_selected, results):
+	if departments_selected and 'All departments' not in departments_selected:
+		app.logger.info("\n\nDepartment filters:%s." % departments_selected)
+		department_ids = []
+		for department_name in departments_selected:
+			if department_name:
+				department = models.Department.query.filter_by(name = department_name).first()
+				if department:
+					department_ids.append(department.id)
+		if department_ids:
+			results = results.filter(models.Request.department_id.in_(department_ids))
 		else:
 			# Just return an empty query set
-			results = results.filter(Request.department_id < 0)
+			results = results.filter(models.Request.department_id < 0)
 	return results
 
 def filter_search_term(search_input, results):
@@ -290,100 +317,110 @@ def filter_search_term(search_input, results):
 		results = results.filter("to_tsvector(text) @@ to_tsquery('%s')" % search_query)
 	return results
 
-@app.route("/requests")
-def requests():
-	return render_template("all_requests.html")
-
-@app.route("/custom/request", methods = ["GET", "POST"])
-def fetch_requests():
-	"""
-	Ultra-custom API endpoint for serving up requests.
-	Supports limit, search, and page parameters and returns json with an object that
-	has a list of results in the 'objects' field.
-	"""
-	user_id = get_user_id()
-	results = db.session.query(Request)
-
-	# Filters!
-	results = filter_department(department_name = request.args.get('department'), results = results)
-	results = filter_search_term(search_input = request.args.get('search_term'), results = results)
-
-	# Accumulate status filters
-	status_filters = []
-
-	if str(request.args.get('open')).lower() == 'true':
-		status_filters.append(Request.open)
-
-	if str(request.args.get('closed')).lower() == 'true':
-		status_filters.append(Request.closed)
-
-	date_format = '%m/%d/%Y'
-
-	min_request_date = request.args.get('min_request_date')
-	max_request_date = request.args.get('max_request_date')
-	if min_request_date and max_request_date:
-		min_request_date = datetime.strptime(min_request_date, date_format)
-		max_request_date = datetime.strptime(max_request_date, date_format)
-		results = results.filter(and_(Request.date_created >= min_request_date, Request.date_created <= max_request_date))
-		app.logger.info('Request Date Bounding. Min: {0}, Max: {1}'.format(min_request_date, max_request_date))
-
-	min_due_date = request.args.get('min_due_date')
-	max_due_date = request.args.get('max_due_date')
-	if min_due_date and max_due_date:
-		min_due_date = datetime.strptime(min_due_date, date_format)
-		max_due_date = datetime.strptime(max_due_date, date_format)
-		results = results.filter(and_(Request.due_date >= min_due_date, Request.due_date <= max_due_date))
-		app.logger.info('Due Date Bounding. Min: {0}, Max: {1}'.format(min_due_date, max_due_date))
-
-	# Filters for agency staff only:
-	if user_id:
-		if str(request.args.get('due_soon')).lower() == 'true':
-			status_filters.append(Request.due_soon)
-
-		if str(request.args.get('overdue')).lower() == 'true':
-			status_filters.append(Request.overdue)
-
-		# Where am I the Point of Contact?
-		if str(request.args.get('mine_as_poc')).lower() == 'true':
-				results = results.filter(Request.id == Owner.request_id) \
-								 .filter(Owner.user_id == user_id) \
-								 .filter(Owner.is_point_person == True)
-
-		# Where am I just a Helper?
-		if str(request.args.get('mine_as_helper')).lower() == 'true':
-				results = results.filter(Request.id == Owner.request_id) \
-								 .filter(Owner.user_id == user_id) \
-								 .filter(Owner.active == True)
-		# Filter based on requester name
-		requester_name = request.args.get('requester_name')
-		if requester_name and requester_name != "":
-			results = results.join(Subscriber, Request.subscribers).join(User).filter(func.lower(User.alias).like("%%%s%%" % requester_name.lower()))
-			
-	# Apply the set of status filters to the query.
-	# Using 'or', they're non-exclusive!
-	results = results.filter(or_(*status_filters))
-
-	app.logger.info(status_filters)
-	app.logger.info(str(results.statement.compile(dialect=postgresql.dialect())))
-
-	sort_by = request.args.get('sort_column') 
-
-	if sort_by and sort_by != '':
-		ascending = request.args.get('sort_direction')
-		app.logger.info("Sort Direction: %s" % ascending)
-		app.logger.info("Sort Column: %s" % sort_by)
-		if ascending == "asc":
-			results = results.order_by((getattr(Request, sort_by)).asc())
+def get_filter_value(filters_map, filter_name, is_list = False, is_boolean = False):
+	if filter_name in filters_map:
+		val = filters_map[filter_name]
+		if filter_name == 'department' and val:
+			return [val]
+		elif is_list:
+			return filters_map.getlist(filter_name)
+		elif is_boolean:
+			return str(val.lower())
 		else:
-			results = results.order_by((getattr(Request, sort_by)).desc())
-	results = results.order_by(Request.id.desc())
+			return val
+	return None
 
-	page_number = int(request.args.get('page_number') or 1)
-	limit = int(request.args.get('limit') or 15)
-	offset = limit * (page_number - 1)
-	app.logger.info("Page Number: {0}, Limit: {1}, Offset: {2}".format(page_number, limit, offset))
+def is_supported_browser():
+	browser = request.user_agent.browser
+	version = request.user_agent.version and int(request.user_agent.version.split('.')[0])
+	platform = request.user_agent.platform
+	uas = request.user_agent.string
+	if browser and version:
+		if (browser == 'msie' and version < 9) \
+		or (browser == 'firefox' and version < 4) \
+		or (platform == 'android' and browser == 'safari' and version < 534) \
+		or (platform == 'iphone' and browser == 'safari' and version < 7000) \
+		or ((platform == 'macos' or platform == 'windows') and browser == 'safari' and not re.search('Mobile', uas) and version < 534) \
+		or (re.search('iPad', uas) and browser == 'safari' and version < 7000) \
+		or (platform == 'windows' and re.search('Windows Phone OS', uas)) \
+		or (browser == 'opera') \
+		or (re.search('BlackBerry', uas)):
+			return False
+	return True
+
+@app.route("/view_requests")
+def display_all_requests(methods = ["GET"]):
+	""" Dynamically load requests page depending on browser. """ 
+	if is_supported_browser():
+		return backbone_requests()
+	else:
+		return no_backbone_requests()
+
+@app.route("/view_requests_backbone")
+def backbone_requests():
+	return render_template("all_requests.html", departments = db.session.query(models.Department).all(), total_requests_count = get_count("Request"))
+
+@app.route("/view_requests_no_backbone")
+def no_backbone_requests():
+	return fetch_requests()
+
+@app.route("/requests", methods = ["GET"])
+def fetch_requests(output_results_only = False, filters_map = None, date_format = '%Y-%m-%d', checkbox_value = 'on'):
+
+	user_id = get_user_id()
+
+	if not filters_map:
+		if request.args: 
+			if is_supported_browser():
+				return backbone_requests()
+			else: # Clear URL
+				filters_map = request.args
+		else:
+			filters_map = request.form
+
+	# Set defaults 
+	is_open = checkbox_value
+	is_closed = None
+	due_soon = checkbox_value
+	overdue = checkbox_value
+	mine_as_poc = checkbox_value
+	mine_as_helper = checkbox_value
+	departments_selected = []
+	sort_column = "id"
+	sort_direction = "asc"
+	min_due_date = None
+	max_due_date = None
+	min_date_received = None
+	max_date_received = None
+	requester_name = None 
+	page_number = 1
+	search_term = None
+
+	if filters_map:
+		departments_selected = get_filter_value(filters_map = filters_map, filter_name = 'departments_selected', is_list = True) or get_filter_value(filters_map, 'department')
+		is_open = get_filter_value(filters_map = filters_map, filter_name = 'is_open', is_boolean = True)
+		is_closed = get_filter_value(filters_map = filters_map, filter_name = 'is_closed', is_boolean = True)
+		due_soon = get_filter_value(filters_map = filters_map, filter_name = 'due_soon', is_boolean = True)
+		overdue = get_filter_value(filters_map = filters_map, filter_name = 'overdue', is_boolean = True)
+		mine_as_poc = get_filter_value(filters_map = filters_map, filter_name = 'mine_as_poc', is_boolean = True)
+		mine_as_helper = get_filter_value(filters_map = filters_map, filter_name = 'mine_as_helper', is_boolean = True)
+		sort_column = get_filter_value(filters_map, 'sort_column') or 'id'
+		sort_direction = get_filter_value(filters_map, 'sort_direction') or 'asc'
+		search_term = get_filter_value(filters_map, 'search_term')
+		min_due_date = get_filter_value(filters_map, 'min_due_date')
+		max_due_date = get_filter_value(filters_map, 'max_due_date')
+		min_date_received = get_filter_value(filters_map, 'min_date_received')
+		max_date_received = get_filter_value(filters_map, 'max_date_received')
+		requester_name = get_filter_value(filters_map, 'requester_name')
+		page_number = int(get_filter_value(filters_map, 'page_number') or '1')
+
+
+	results = get_results_by_filters(departments_selected = departments_selected, is_open = is_open, is_closed = is_closed, due_soon = due_soon, overdue = overdue, mine_as_poc = mine_as_poc, mine_as_helper = mine_as_helper, sort_column = sort_column, sort_direction = sort_direction, search_term = search_term, min_due_date = min_due_date, max_due_date = max_due_date, min_date_received = min_date_received, max_date_received = max_date_received, requester_name = requester_name, page_number = page_number, user_id = user_id, date_format = date_format, checkbox_value = checkbox_value)
 
 	# Execute query
+	limit = 15
+	offset = limit * (page_number - 1)
+	app.logger.info("Page Number: {0}, Limit: {1}, Offset: {2}".format(page_number, limit, offset))
 	more_results = False
 	num_results = results.count()
 	start_index = 0
@@ -400,15 +437,36 @@ def fetch_requests():
 			end_index = num_results
 
 	results = results.limit(limit).offset(offset).all()
+	requests = prepare_request_fields(results = results)
+	if output_results_only == True:
+		return requests, num_results, more_results, start_index, end_index
 
-	# TODO(cj@postcode.io): This map is pretty kludgy, we should be detecting columns and auto
-	# magically making them fields in the JSON objects we return.
+	return render_template("all_requests_less_js.html", total_requests_count = get_count("Request"), requests = requests, departments = db.session.query(models.Department).all(), departments_selected = departments_selected, is_open = is_open, is_closed = is_closed, due_soon = due_soon, overdue = overdue, mine_as_poc = mine_as_poc, mine_as_helper = mine_as_helper, sort_column = sort_column, sort_direction = sort_direction, search_term = search_term, min_due_date = min_due_date, max_due_date = max_due_date, min_date_received = min_date_received, max_date_received = max_date_received, requester_name = requester_name, page_number = page_number, more_results = more_results, num_results = num_results, start_index = start_index, end_index = end_index)
 
+@app.route("/custom/request", methods = ["GET", "POST"])
+def json_requests():
+	"""
+	Ultra-custom API endpoint for serving up requests.
+	Supports limit, search, and page parameters and returns json with an object that
+	has a list of results in the 'objects' field.
+	"""
+	objects, num_results, more_results, start_index, end_index = fetch_requests(output_results_only = True, filters_map = request.args, date_format = '%m/%d/%Y', checkbox_value = 'true')
+	matches = {
+		"objects": 		objects,
+		"num_results": 	num_results,
+		"more_results": more_results,
+		"start_index": 	start_index,
+		"end_index": 	end_index
+		}
+	response = anyjson.serialize(matches)
+	return Response(response, mimetype = "application/json")
+
+def prepare_request_fields(results):
 	if current_user.is_anonymous():
-		results = map(lambda r: {     
+		return map(lambda r: {     
 			  "id":           r.id, \
 			  "text":         helpers.clean_text(r.text), \
-			  "date_created": helpers.date(r.date_received or r.date_created), \
+			  "date_received": helpers.date(r.date_received or r.date_created), \
 			  "department":   r.department_name(), \
 			  "status":       r.status, \
 			  # The following two attributes are defined as model methods,
@@ -417,10 +475,10 @@ def fetch_requests():
 			  "solid_status": r.solid_status()
 			   }, results)
 	else:
-		results = map(lambda r: {     
+		return map(lambda r: {     
 			  "id":           r.id, \
 			  "text":         helpers.clean_text(r.text), \
-			  "date_created": helpers.date(r.date_received or r.date_created), \
+			  "date_received": helpers.date(r.date_received or r.date_created), \
 			  "department":   r.department_name(), \
 			  "requester":    r.requester_name(), \
 			  "due_date":     format_date(r.due_date), \
@@ -432,17 +490,94 @@ def fetch_requests():
 			   }, results)
 
 
-	matches = {
-		"objects": 		results,
-		"num_results": 	num_results,
-		"more_results": more_results,
-		"start_index": 	start_index,
-		"end_index": 	end_index
-		}
-	response = anyjson.serialize(matches)
-	return Response(response, mimetype = "application/json")
+def get_results_by_filters(departments_selected, is_open, is_closed, due_soon, overdue, mine_as_poc, mine_as_helper, sort_column, sort_direction, search_term, min_due_date, max_due_date, min_date_received, max_date_received, requester_name, page_number, user_id, date_format, checkbox_value):
+	# Initialize query
+	results = db.session.query(models.Request)
 
-@app.route("/page")
+	# Set filters on the query
+
+	results = filter_department(departments_selected = departments_selected, results = results)
+	results = filter_search_term(search_input = search_term, results = results)
+
+	# Accumulate status filters
+	status_filters = []
+
+	if is_open == checkbox_value:
+		status_filters.append(models.Request.open)
+		if not user_id:
+			status_filters.append(models.Request.due_soon)
+			status_filters.append(models.Request.overdue)
+
+	if is_closed == checkbox_value:
+		status_filters.append(models.Request.closed)
+
+	if min_date_received and max_date_received and min_date_received != "" and max_date_received != "":
+		try:
+			min_date_received = datetime.strptime(min_date_received, date_format)
+			max_date_received = datetime.strptime(max_date_received, date_format) + timedelta(hours = 23, minutes = 59) 
+			results = results.filter(and_(models.Request.date_received >= min_date_received, models.Request.date_received <= max_date_received))
+			app.logger.info('Request Date Bounding. Min: {0}, Max: {1}'.format(min_date_received, max_date_received))
+		except:
+			app.logger.info('There was an error parsing the request date filters. Received Min: {0}, Max {1}'.format(min_date_received, max_date_received))
+
+
+	# Filters for agency staff only:
+	if user_id:
+
+		if due_soon == checkbox_value:
+			status_filters.append(models.Request.due_soon)
+
+		if overdue == checkbox_value:
+			status_filters.append(models.Request.overdue)
+
+		if min_due_date and max_due_date and min_due_date != "" and max_due_date != "":
+			try:
+				min_due_date = datetime.strptime(min_due_date, date_format)
+				max_due_date = datetime.strptime(max_due_date, date_format) + timedelta(hours = 23, minutes = 59)  
+				results = results.filter(and_(models.Request.due_date >= min_due_date, models.Request.due_date <= max_due_date))
+				app.logger.info('Due Date Bounding. Min: {0}, Max: {1}'.format(min_due_date, max_due_date))
+			except:
+				app.logger.info('There was an error parsing the due date filters. Due Date Min: {0}, Max {1}'.format(min_due_date, max_due_date))
+
+		# PoC and Helper filters
+		if mine_as_poc == checkbox_value: 
+			if mine_as_helper == checkbox_value:
+				# Where am I the Point of Contact *or* the Helper?
+				results = results.filter(models.Request.id == models.Owner.request_id) \
+								 .filter(models.Owner.user_id == user_id) \
+								 .filter(models.Owner.active == True)
+			else:
+				# Where am I the Point of Contact only?
+				results = results.filter(models.Request.id == models.Owner.request_id) \
+								 .filter(models.Owner.user_id == user_id) \
+								 .filter(models.Owner.is_point_person == True)
+		elif mine_as_helper == checkbox_value:
+				# Where am I a Helper only?
+				results = results.filter(models.Request.id == Owner.request_id) \
+								 .filter(models.Owner.user_id == user_id) \
+								 .filter(models.Owner.active == True) \
+								 .filter(models.Owner.is_point_person == False)
+		# Filter based on requester name
+		requester_name = requester_name
+		if requester_name and requester_name != "":
+			results = results.join(models.Subscriber, models.Request.subscribers).join(models.User).filter(func.lower(models.User.alias).like("%%%s%%" % requester_name.lower()))
+			
+	# Apply the set of status filters to the query.
+	# Using 'or', they're non-exclusive!
+	results = results.filter(or_(*status_filters))
+
+	if sort_column:
+		app.logger.info("Sort Direction: %s" % sort_direction)
+		app.logger.info("Sort Column: %s" % sort_column)
+		if sort_direction == "desc":
+			results = results.order_by((getattr(models.Request, sort_column)).desc())
+		else:
+			results = results.order_by((getattr(models.Request, sort_column)).asc())
+
+	return results.order_by(models.Request.id.desc())
+
+
+@app.route("/<page>")
 def any_page(page):
 	try:
 		return render_template('%s.html' %(page))

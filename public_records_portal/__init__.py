@@ -1,6 +1,8 @@
 """A flask app to handle public records requests and display responses.
 
-.. moduleauthor:: Richa Agarwal <richa@postcode.io>
+	Initializes application and all of its environment variables.
+
+.. moduleauthor:: Richa Agarwal <richa@codeforamerica.org>
 
 """
 
@@ -13,6 +15,8 @@ from flask.ext.sqlalchemy import SQLAlchemy
 app = Flask(__name__)
 app.debug = True
 
+
+
 # Set environment variables
 def set_env(key, default = None):
 	if key in environ:
@@ -23,10 +27,9 @@ def set_env(key, default = None):
 # UPDATES TO THESE DEFAULTS SHOULD OCCUR IN YOUR .env FILE.
 
 set_env(key = 'APPLICATION_URL', default = "http://127.0.0.1:5000/") 
-set_env(key = 'SQLALCHEMY_DATABASE_URI', default = "postgresql://localhost/recordtrac")
 set_env(key = 'ENVIRONMENT', default="LOCAL")
 # The default records liaison, to whom requests get routed to if no department is selected:
-set_env(key = 'DEFAULT_OWNER_EMAIL', default = 'recordtrac@postcode.io')
+set_env(key = 'DEFAULT_OWNER_EMAIL', default = 'recordtrac@codeforamerica.org')
 set_env(key = 'DEFAULT_OWNER_REASON', default = 'Open government coordinator' )
 
 set_env(key = 'HOST_URL', default = 'https://www.scribd.com/doc/') # Where the documents/record uploads are hosted
@@ -38,6 +41,8 @@ set_env(key = 'SECRET_KEY', default = 'Change this to something super secret') #
 set_env(key = 'DAYS_TO_FULFILL', default = '10')
 set_env(key = 'DAYS_AFTER_EXTENSION', default = '14')
 set_env(key = 'DAYS_UNTIL_OVERDUE', default = '2') 
+
+set_env(key = 'TIMEZONE', default = "US/Pacific")
 
 # Set rest of the variables that don't have defaults:
 envvars = [
@@ -59,12 +64,14 @@ envvars = [
 			'LIAISONS_URL', # The path/URL at which a csv containing liaisons/department data lives. If this is not set, initial request routing will always be directed to the default owner
 			'LOGO_ON_WHITE_URL', # The path/URL at which a logo (on a white background) of the agency is hosted. (.png or .jpg)
 			'LOGO_ON_BLACK_URL', # The path/URL at which a logo (on a black background) of the agency is hosted. (.png or .jpg)
-			'TESTING'
-			,
+			'TESTING', # Set if you are running tests. Primarily used to ignore @login_requireds when running tests.
+			'SHOULD_UPLOAD' # Set if you want to test uploading documents to the specified host (currently Scribd)
 			]
 for envvar in envvars:
 	set_env(key = envvar)
 
+# Database gets set slightly differently, to support difference between Flask and Heroku naming:
+app.config['SQLALCHEMY_DATABASE_URI'] = environ['DATABASE_URL'] 
 
 # Initialize database
 db = SQLAlchemy(app)

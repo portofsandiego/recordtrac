@@ -1,3 +1,11 @@
+"""
+    public_records_portal.models
+    ~~~~~~~~~~~~~~~~
+
+    Defines RecordTrac's database schema, and implements helper functions.
+
+"""
+
 from flask.ext.sqlalchemy import SQLAlchemy, sqlalchemy
 from flask.ext.login import current_user
 
@@ -11,6 +19,7 @@ from public_records_portal import db, app
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 import re
+from validate_email import validate_email
 
 
 ### @export "User"
@@ -47,7 +56,8 @@ class User(db.Model):
 			return self.phone
 		return "N/A"
 	def __init__(self, email=None, alias = None, phone=None, department = None, contact_for=None, backup_for=None, is_staff = False):
-		self.email = email
+		if email and validate_email(email):
+			self.email = email
 		self.alias = alias
 		if phone and phone != "":
 			self.phone = phone
@@ -107,17 +117,15 @@ class Request(db.Model):
 	notes = relationship("Note", cascade="all,delete", order_by = "Note.date_created.desc()") # The list of notes appended to this request.
 	status = db.Column(db.String(400)) # The status of the request (open, closed, etc.)
 	creator_id = db.Column(db.Integer, db.ForeignKey('user.id')) # If city staff created it on behalf of the public, otherwise the creator is the subscriber with creator = true
-	department = db.Column(db.String())
 	department_id = db.Column(db.Integer, db.ForeignKey("department.id"))
-	department_obj = relationship("Department", uselist = False)
+	department = relationship("Department", uselist = False)
 	date_received = db.Column(db.DateTime)
 	offline_submission_type = db.Column(db.String())
 
-	def __init__(self, text, creator_id = None, department = None, offline_submission_type = None, date_received = None):
+	def __init__(self, text, creator_id = None, offline_submission_type = None, date_received = None):
 		self.text = text
 		self.date_created = datetime.now().isoformat()
 		self.creator_id = creator_id
-		self.department = department
 		self.offline_submission_type = offline_submission_type
 		if date_received and type(date_received) is datetime:
 				self.date_received = date_received
@@ -126,13 +134,12 @@ class Request(db.Model):
 		return '<Request %r>' % self.text
 
 	def set_due_date(self):
-		date_received = self.date_received
-		if not date_received:
-			date_received = self.date_created
+		if not self.date_received:
+			self.date_received = self.date_created
 		if self.extended == True:
-			self.due_date = date_received + timedelta(days = int(app.config['DAYS_AFTER_EXTENSION']))
+			self.due_date = self.date_received + timedelta(days = int(app.config['DAYS_AFTER_EXTENSION']))
 		else:
-			self.due_date = date_received + timedelta(days = int(app.config['DAYS_TO_FULFILL']))
+			self.due_date = self.date_received + timedelta(days = int(app.config['DAYS_TO_FULFILL']))
 
 	def extension(self):
 		self.extended = True 
@@ -170,8 +177,8 @@ class Request(db.Model):
 			return point_person.user.get_alias()
 		return "N/A"
 	def department_name(self):
-		if self.department_obj:
-			return self.department_obj.get_name()
+		if self.department:
+			return self.department.get_name()
 		return "N/A"
 	def is_closed(self):
 		if self.status:
@@ -191,23 +198,23 @@ class Request(db.Model):
 						return "due soon"
 		return "open"
 
-        @hybrid_property
-        def open(self):
-                two_days = datetime.now() + timedelta(days = 2)
-                return and_(~self.closed, self.due_date > two_days)
+	@hybrid_property
+	def open(self):
+			two_days = datetime.now() + timedelta(days = 2)
+			return and_(~self.closed, self.due_date > two_days)
 
-        @hybrid_property
-        def due_soon(self):
-                two_days = datetime.now() + timedelta(days = 2)
-                return and_(self.due_date < two_days, self.due_date > datetime.now(), ~self.closed)
-     
-        @hybrid_property
-        def overdue(self):
-                return and_(self.due_date < datetime.now(), ~self.closed)
-        
-        @hybrid_property
-        def closed(self):
-                return Request.status.ilike("%closed%")
+	@hybrid_property
+	def due_soon(self):
+			two_days = datetime.now() + timedelta(days = 2)
+			return and_(self.due_date < two_days, self.due_date > datetime.now(), ~self.closed)
+ 
+	@hybrid_property
+	def overdue(self):
+			return and_(self.due_date < datetime.now(), ~self.closed)
+	
+	@hybrid_property
+	def closed(self):
+			return Request.status.ilike("%closed%")
 
 ### @export "QA"
 class QA(db.Model):
@@ -220,11 +227,11 @@ class QA(db.Model):
 	owner_id = db.Column(db.Integer, db.ForeignKey('user.id')) # Actually just a user ID
 	subscriber_id = db.Column(db.Integer, db.ForeignKey('user.id')) # Actually just a user ID
 	date_created = db.Column(db.DateTime)
-	def __init__(self, request_id, question, owner_id = None):
+	def __init__(self, request_id, question, user_id = None):
 		self.question = question
 		self.request_id = request_id
 		self.date_created = datetime.now().isoformat()
-		self.owner_id = owner_id
+		self.owner_id = user_id
 	def __repr__(self):
 		return "<QA Q: %r A: %r>" %(self.question, self.answer)
 
@@ -264,8 +271,8 @@ class Subscriber(db.Model):
 	request_id = db.Column(db.Integer, db.ForeignKey('request.id'))
 	date_created = db.Column(db.DateTime)
 	owner_id = db.Column(db.Integer, db.ForeignKey('owner.id')) # Not null if responsible for fulfilling a part of the request. UPDATE 6-11-2014: This isn't used. we should get rid of it.
- 	def __init__(self, request_id, user_id, creator = False):
- 		self.user_id = user_id
+	def __init__(self, request_id, user_id, creator = False):
+		self.user_id = user_id
 		self.request_id = request_id
 		self.date_created = datetime.now().isoformat()
 	def __repr__(self):

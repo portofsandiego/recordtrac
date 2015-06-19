@@ -17,9 +17,8 @@
 				<h3>A better way to find public records.</h3>
 			</div>
 			<div class="span4">
-				<img id="logo_landing" src="{{config['LOGO_ON_WHITE_URL']}}" alt="{{config['AGENCY_NAME']}} logo" width="130" height="130"/>
+				<img id="logo_landing" src="{{config['LOGO_ON_WHITE_URL']}}" alt="{{config['AGENCY_NAME']}} logo"/>
 			</div>
-
 		</div>
 		<div class="row-fluid">
 			<p class="lead">Use RecordTrac to tell the {{config['AGENCY_NAME']}} the type of documents you need. We display every message or record uploaded. You may find what you're looking for without having to submit a new request.  <a href="/about">Find out more…</a></p>
@@ -29,8 +28,8 @@
 				<div class="row-fluid">
 					<div class="span4">
 						<div class="row-fluid">
-							<a href="/requests" class="btn btn-link round_link">
-								<img src="{{ url_for('static', filename='images/explore.png') }}" width="75px" class="center-image" alt="explore">
+							<a href="/view_requests" class="btn btn-link round_link">
+								<img src="{{ url_for('static', filename='images/explore.png') }}" class="left-image" alt="explore">
 								<h4 class="text-center text-title">EXPLORE</h4>
 								<p class="span10 offset1 text-center text-body">View <span id="request-count" class="badge badge-info">
 									{% set all_record_requests = "Request" | get_objs %}
@@ -42,7 +41,7 @@
 					<div class="span4">
 						<div class="row-fluid">
 							<a href="/new" class="btn btn-link round_link">
-								<img src="{{ url_for('static', filename='images/create.png') }}" width="100px" class="center-image" alt="create">
+								<img src="{{ url_for('static', filename='images/create.png') }}" class="center-image" alt="create">
 								<h4 class="text-center text-title">REQUEST</h4>
 								<p class="span10 offset1 text-center text-body">Create a new public records request.</p>
 							</a>
@@ -51,7 +50,7 @@
 					<div class="span4">
 						<div class="row-fluid">
 							<a href="/track" class="btn btn-link round_link">
-								<img src="{{ url_for('static', filename='images/track.png') }}" width="150px" class="center-image" alt="track">
+								<img src="{{ url_for('static', filename='images/track.png') }}" class="right-image" alt="track">
 								<h4 class="text-center text-title">TRACK</h4>
 								<p class="span10 offset1 text-center text-body">Get real-time updates as we process your request.</p>
 							</a>
@@ -61,35 +60,17 @@
 				</div>
 			</div>
 		</div>
+
 		<!-- <div class="row-fluid">
-			<img src="{{ url_for('static', filename='images/explore_request_track3.png') }}" class="center-image" width="85%" alt="request,track,explore"/>
-		</div>
-		<div class="row-fluid">
-			<div class="span4">
-				<p class="text-center text-title">EXPLORE</p>
-				<p class="text-center text-body">View <span id="request-count" class="badge badge-info">
-					{% set all_record_requests = "Request" | get_objs %}
-					{{ all_record_requests | count }}</span> past requests and counting.</p>
-			</div>
-			<div class="span4">
-				<p class="text-center text-title">REQUEST</p>
-				<p class="text-center text-body">Create a new public records request.</p>
-			</div>
-			<div class="span4">
-				<p class="text-center text-title">TRACK</p>
-				<p class="text-center text-body">Get real-time updates as we process your request.</p>
-			</div>
-		</div> -->
-		<div class="row-fluid">
 			<div class="span4 offset4">
 				<a href="#recent-requests" id="seedata" class="btn btn-large btn-block btn-primary">See how {{config['AGENCY_NAME']}}'s doing <i class="icon-arrow-down"> </i></a>
 			</div>
-		</div>
+		</div> -->
 	</div>
 </div>
-</div><!-- end container div -->
+<!-- end container div -->
 
-<div class="row-fluid">
+<!-- <div class="row-fluid">
 	<div class="well">
 		<h3 id="recent-requests" class="text-center">{{config['AGENCY_NAME']}} Request Statistics</h3>
     <div class="span5 offset1">
@@ -114,7 +95,7 @@
 				</div>
 			</div>
 		</div>
-  </div>
+  </div> -->
 <!-- block container closes div -->
 
 {% endblock container %}
@@ -127,10 +108,6 @@
 {% endblock footer %}
 
 {% block custom_script_links %}
-<script type="text/javascript" src="{{ url_for('static', filename='js/responses_viz.js') }}"></script>
-	<script type="text/javascript">var viz_data_freq = {{viz_data_freq | safe}}</script>
-	<script type="text/javascript">var viz_data_time = {{viz_data_time | safe}}</script>
-  <script type="text/javascript" src="{{ url_for('static', filename='js/plugins/d3.v3.min.js') }}"></script>
-  <script src="http://labratrevenge.com/d3-tip/javascripts/d3.tip.min.js"></script>
+
   
 {% endblock custom_script_links %}

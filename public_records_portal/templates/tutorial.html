@@ -1,18 +1,19 @@
-<!-- This template is for the tutorial. -->
+{#
+
+This template is for the tutorial.
+
+This template is for testing purposes.
+
+This template houses the baseline case information (request, documents, status, etc.) only.
+
+This template provides the header, footer, and envelope info for all pages except signup.
+
+#}<!doctype html>
 
 {% block custom_css_links %}
 <link rel=stylesheet type=text/css href="{{ url_for('static', filename='css/plugins/bootstro.css') }}">
 {% endblock custom_css_links %}
 
-
-
-<!-- This template is for testing purposes. -->
-
-<!-- This template houses the baseline case information (request, documents, status, etc.) only. -->
-
-<!-- This template provides the header, footer, and envelope info for all pages except signup. -->
-
-<!doctype html>
 <html class="no-js">
   <head>
     <meta http-equiv="X-UA-Compatible" content="chrome=1">
@@ -39,7 +40,7 @@
 <!--     <link rel=stylesheet type=text/css href="/static/css/plugins/select2.css"> -->
 
   <!-- modernizr -->
-  <script type="text/javascript" src="/static/js/plugins/modernizr-latest.js"></script>
+  <script type="text/javascript" src="/static/js/plugins/modernizr-latest-min.js"></script>
 
   <!-- google analytics -->
     <!-- for later: guide to add event-driven analytics http://www.sitepoint.com/google-analytics-track-javascript-ajax-events/ -->
@@ -74,7 +75,7 @@
               <ul class="nav tabs">
                 {% if current_user.is_authenticated() %}
                 <li><a href="/new">New request</a></li>
-                <li><a href="/requests">All requests</a></li>
+                <li><a href="/view_requests">All requests</a></li>
                 <li class="bootstro" data-bootstro-title="Tutorial" data-bootstro-content="{{"Back to Tutorial" | tutorial }}" data-bootstro-step="10" data-bootstro-placement="bottom" data-bootstro-width="50%" data-bootstro-html="true"><a href="/tutorial">Tutorial</a></li>
 <!--                 <li><a href="/admin">Admin</a></li> -->
                 <li><a href="/about">About</a></li>

@@ -153,6 +153,7 @@
               <p id="no-records"><i>No records uploaded yet.</i></p>
             </div>
           {% endif %}
+          {% block response_actions_lessjs %}{% endblock response_actions_lessjs %}
         </div>
       {% endblock responses_container %}
     </div>
@@ -162,7 +163,7 @@
 
         {% block status %}{% endblock status %}
 
-        <div class="b_sidebar r_sidebar-fixed ">
+        <div class="b_sidebar">
           <div class="row-fluid participantRow">
               <h4 class="case_participantRow">Point of Contact</h4>
               {% include '_contact_popover.html' %}

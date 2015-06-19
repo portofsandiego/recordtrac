@@ -15,7 +15,7 @@
 {% endblock custom_css_links %}
 
 {% block requester_info %}
-  <small>
+  <div>
     {% set alias = "Not provided" %}
     {% set phone = "Not provided" %}
     {% set requester = req.requester() %}
@@ -26,10 +26,16 @@
        {% set phone = user.phone %}
     {% endif %}
     {% if not email %}
-        <i class="icon icon-2x icon-exclamation-sign"></i> Requester's e-mail: <span class="label">Not provided</span><br/>
+      <span id="no_email">
+        <strong><i class="icon icon-exclamation-sign"></i> Requester's e-mail has not been provided.</strong>
+      </span>
+    <small>
     {% endif %}
-      Requester's name: <span class="label">{{ alias or "Not provided" }}</span> and phone number: <span class="label"> {{ phone or "Not provided" }}</span>
-  </small>
+      <span>
+        Requester's name: <span class="label">{{ alias or "Not provided" }}</span> and phone number: <span class="label"> {{ phone or "Not provided" }}</span>
+      </span>
+    </small>
+  </div>
 {% endblock requester_info %}
 
 {% block proxyrequester_info %}
@@ -54,7 +60,7 @@
 
 
 
-  <div class="b_sidebar r_sidebar-fixed ">
+  <div class="b_sidebar">
     <div class="row-fluid participantRow">
 
         <a data-placement="left" href="#" id="reroutePopover"><div class="popover-container"><h4 class="participantRow-title">Point of Contact <span class="pull-right"><small><i class="icon-arrow-right"></i></small><i class="icon-user"></i></span></h4>
